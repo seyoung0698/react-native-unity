@@ -24,10 +24,27 @@ import java.util.Map;
 
 import javax.annotation.Nonnull;
 
-public class ReactNativeUnityViewManager extends SimpleViewManager<ReactNativeUnityView> implements LifecycleEventListener, View.OnAttachStateChangeListener {
+//import FrameLayout;
+import android.widget.FrameLayout;
+//import ViewGroup
+import android.view.ViewGroup;
+//import Activity
+import android.app.Activity;
+//import Context
+import android.content.Context;
+//import LayoutInflater
+import android.view.LayoutInflater;
+import com.unity3d.player.IUnityPlayerLifecycleEvents;
+//import windowManager
+import android.view.WindowManager;
+
+
+public class ReactNativeUnityViewManager extends SimpleViewManager<View> implements LifecycleEventListener, View.OnAttachStateChangeListener {
     public static final String REACT_CLASS = "ReactNativeUnityView";
     ReactApplicationContext context;
-    static ReactNativeUnityView view;
+    static View view;
+    static View subView;
+    protected UnityPlayer unityPlayer;
 
     public ReactNativeUnityViewManager(ReactApplicationContext context) {
         super();
@@ -40,159 +57,153 @@ public class ReactNativeUnityViewManager extends SimpleViewManager<ReactNativeUn
         return REACT_CLASS;
     }
 
-    @Override
-    @NonNull
-    protected ReactNativeUnityView createViewInstance(@Nonnull ThemedReactContext reactContext) {
-        view = new ReactNativeUnityView(reactContext);
-        view.addOnAttachStateChangeListener(this);
+   
+  @Override
+  @NonNull
+  protected View createViewInstance(@Nonnull ThemedReactContext reactContext) {
 
-        if (ReactNativeUnity.getPlayer() != null) {
-            view.setUnityPlayer(ReactNativeUnity.getPlayer());
-        } else {
-            ReactNativeUnity.createPlayer(reactContext.getCurrentActivity(), new ReactNativeUnity.UnityPlayerCallback() {
-                @Override
-                public void onReady() {
-                    view.setUnityPlayer(ReactNativeUnity.getPlayer());
+      if(unityPlayer != null) {
+          unityPlayer.windowFocusChanged(true);
+          unityPlayer.requestFocus();
+          unityPlayer.resume();
+          return subView;
+      }
+
+        unityPlayer = new UnityPlayer(reactContext);
+
+
+
+      Activity activity = reactContext.getCurrentActivity();
+      int flag = activity.getWindow().getAttributes().flags;
+      boolean fullScreen = false;
+      if ((flag & WindowManager.LayoutParams.FLAG_FULLSCREEN) == WindowManager.LayoutParams.FLAG_FULLSCREEN) {
+          fullScreen = true;
+      }
+
+      LayoutInflater inflater = (LayoutInflater) reactContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+
+      subView = inflater.inflate(R.layout.activity_sub, null);
+
+      FrameLayout unityPlayerLayout = subView.findViewById(R.id.unity_player_layout);
+      unityPlayerLayout.addView(unityPlayer.getView());
+
+      if (!fullScreen) {
+        activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
+        activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+      }
+
+      unityPlayer.windowFocusChanged(true);
+      unityPlayer.requestFocus();
+      unityPlayer.resume();
+
+      return subView;
+  }
+  
+  @Override
+  public void receiveCommand(
+      @NonNull View view,
+      String commandType,
+      @Nullable ReadableArray args) {
+          Assertions.assertNotNull(view);
+          Assertions.assertNotNull(args);
+          switch (commandType) {
+              case "postMessage":
+                  assert args != null;
+                  postMessage(args.getString(0), args.getString(1), args.getString(2));
+                  return;
+              case "unloadUnity":
+                  unloadUnity();
+                  return;
+              case "pauseUnity":
+                  unityPlayer.pause();
+                  return;
+              case "resumeUnity":
+                  unityPlayer.resume();
+                  return;
+              case "didBecomeActive":
+                  unityPlayer.windowFocusChanged(true);
+                  unityPlayer.requestFocus();
+                  unityPlayer.resume();
+                  return;
+              default:
+                  throw new IllegalArgumentException(String.format(
+                      "Unsupported command %s received by %s.",
+                      commandType,
+                      getClass().getSimpleName()));
+    }
+  }
+
+  public Map getExportedCustomBubblingEventTypeConstants() {
+    return MapBuilder.builder()
+            .put("onUnityMessage", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onUnityMessage")))
+            .put("onPlayerUnload", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPlayerUnload")))
+            .put("onPlayerQuit", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPlayerQuit")))
+            .build();
+}
+
+  public void unloadUnity() {
+    if(unityPlayer != null){
+        unityPlayer.unload();
+    }
+  }
+
+  public void postMessage(String gameObject, String methodName, String message) {
+    if(unityPlayer != null){
+        unityPlayer.UnitySendMessage(gameObject, methodName, message);
+    }
+  }
+
+  public static void sendMessageToMobileApp(String message) {
+    WritableMap data = Arguments.createMap();
+    data.putString("message", message);
+    ReactContext reactContext = (ReactContext) subView.getContext();
+    reactContext.getJSModule(RCTEventEmitter.class).receiveEvent(subView.getId(), "onUnityMessage", data);
+  }
+
+  @Override
+  public void onHostResume() {
+      if(unityPlayer != null){
+          unityPlayer.resume();
+          restoreUnityUserState();
+      }
+  }
+
+  @Override
+  public void onHostPause() {
+      if(unityPlayer != null){
+          unityPlayer.pause();
+      }
+  }
+
+  @Override
+  public void onHostDestroy() {
+      if(unityPlayer != null){
+          unityPlayer.quit();
+      }
+  }
+
+  private void restoreUnityUserState() {
+    if(unityPlayer != null){
+        Handler handler = new Handler();
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (unityPlayer != null) {
+                    unityPlayer.pause();
                 }
-
-                @Override
-                public void onUnload() {
-                  WritableMap data = Arguments.createMap();
-                  data.putString("message", "MyMessage");
-                  ReactContext reactContext = (ReactContext) view.getContext();
-                  reactContext.getJSModule(RCTEventEmitter.class).receiveEvent(view.getId(), "onPlayerUnload", data);
-                }
-
-                @Override
-                public void onQuit() {
-                  WritableMap data = Arguments.createMap();
-                  data.putString("message", "MyMessage");
-                  ReactContext reactContext = (ReactContext) view.getContext();
-                  reactContext.getJSModule(RCTEventEmitter.class).receiveEvent(view.getId(), "onPlayerQuit", data);
-                }
-            });
-        }
-
-        return view;
+            }
+        }, 300);
     }
+  }
 
-    public Map getExportedCustomBubblingEventTypeConstants() {
-        return MapBuilder.builder()
-                .put("onUnityMessage", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onUnityMessage")))
-                .put("onPlayerUnload", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPlayerUnload")))
-                .put("onPlayerQuit", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPlayerQuit")))
-                .build();
-    }
+  @Override
+  public void onViewAttachedToWindow(View v) {
+      restoreUnityUserState();
+  }
 
-    @Override
-    public void receiveCommand(
-            @NonNull ReactNativeUnityView view,
-            String commandType,
-            @Nullable ReadableArray args) {
-        Assertions.assertNotNull(view);
-        Assertions.assertNotNull(args);
-        switch (commandType) {
-            case "postMessage":
-                assert args != null;
-                postMessage(args.getString(0), args.getString(1), args.getString(2));
-                return;
-            case "unloadUnity":
-                unloadUnity(view);
-                return;
-            case "pauseUnity":
-                ReactNativeUnity.getPlayer().pause();
-                return;
-            case "resumeUnity":
-                ReactNativeUnity.getPlayer().resume();
-                return;
-            default:
-                throw new IllegalArgumentException(String.format(
-                        "Unsupported command %s received by %s.",
-                        commandType,
-                        getClass().getSimpleName()));
-        }
-    }
+  @Override
+  public void onViewDetachedFromWindow(View v) {
 
-    public void unloadUnity(ReactNativeUnityView view) {
-        if (ReactNativeUnity.isUnityReady()) {
-            ReactNativeUnity.unload();
-        }
-    }
+  }
 
-    public void postMessage(String gameObject, String methodName, String message) {
-        if (ReactNativeUnity.isUnityReady()) {
-            UnityPlayer.UnitySendMessage(gameObject, methodName, message);
-        }
-    }
-
-    public static void sendMessageToMobileApp(String message) {
-        WritableMap data = Arguments.createMap();
-        data.putString("message", message);
-        ReactContext reactContext = (ReactContext) view.getContext();
-        reactContext.getJSModule(RCTEventEmitter.class).receiveEvent(view.getId(), "onUnityMessage", data);
-    }
-
-    @Override
-    public void onDropViewInstance(ReactNativeUnityView view) {
-        view.removeOnAttachStateChangeListener(this);
-        super.onDropViewInstance(view);
-    }
-
-    @Override
-    public void onHostResume() {
-        if (ReactNativeUnity.isUnityReady()) {
-            ReactNativeUnity.getPlayer().resume();
-            restoreUnityUserState();
-        }
-    }
-
-    @Override
-    public void onHostPause() {
-        if (ReactNativeUnity.isUnityReady()) {
-            // Don't use UnityUtils.pause()
-            ReactNativeUnity.getPlayer().pause();
-        }
-    }
-
-    @Override
-    public void onHostDestroy() {
-        if (ReactNativeUnity.isUnityReady()) {
-            ReactNativeUnity.getPlayer().quit();
-        }
-    }
-
-    private void restoreUnityUserState() {
-        // restore the unity player state
-        if (ReactNativeUnity.isUnityPaused()) {
-            Handler handler = new Handler();
-            handler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    if (ReactNativeUnity.getPlayer() != null) {
-                        ReactNativeUnity.getPlayer().pause();
-                    }
-                }
-            }, 300);
-        }
-    }
-
-    @Override
-    public void onViewAttachedToWindow(View v) {
-        restoreUnityUserState();
-    }
-
-    @Override
-    public void onViewDetachedFromWindow(View v) {
-
-    }
-
-    @ReactProp(name = "androidKeepPlayerMounted", defaultBoolean = false)
-    public void setAndroidKeepPlayerMounted(ReactNativeUnityView view, boolean keepPlayerMounted) {
-        view.keepPlayerMounted = keepPlayerMounted;
-    }
-
-    @ReactProp(name = "fullScreen", defaultBoolean = true)
-    public void setFullScreen(ReactNativeUnityView _view, boolean fullScreen) {
-        ReactNativeUnity._fullScreen = fullScreen;
-    }
 }

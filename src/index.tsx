@@ -65,6 +65,14 @@ export default class UnityView extends React.Component<ReactNativeUnityViewProps
     );
   }
 
+  public didBecomeActive() {
+    UIManager.dispatchViewManagerCommand(
+      findNodeHandle(this),
+      this.getCommand('didBecomeActive'),
+      []
+    );
+  }
+
   private getCommand(cmd: string): any {
     if (Platform.OS === 'ios') {
       return UIManager.getViewManagerConfig('ReactNativeUnityView').Commands[
@@ -82,7 +90,7 @@ export default class UnityView extends React.Component<ReactNativeUnityViewProps
   }
 
   public componentWillUnmount() {
-    this.unloadUnity();
+    Platform.OS === 'ios' && this.unloadUnity();
   }
 
   public render() {
