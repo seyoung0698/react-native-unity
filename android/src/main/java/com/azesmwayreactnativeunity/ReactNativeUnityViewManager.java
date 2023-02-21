@@ -143,7 +143,8 @@ public class ReactNativeUnityViewManager extends SimpleViewManager<View> impleme
 
   public void unloadUnity() {
     if(unityPlayer != null){
-        unityPlayer.unload();
+        // unityPlayer.unload();
+        unityPlayer.UnitySendMessage("GameManager", "DestroyAll", "android");
     }
   }
 
