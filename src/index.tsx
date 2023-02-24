@@ -89,10 +89,6 @@ export default class UnityView extends React.Component<ReactNativeUnityViewProps
     };
   }
 
-  public componentWillUnmount() {
-    Platform.OS === 'ios' && this.unloadUnity();
-  }
-
   public render() {
     return <ReactNativeUnityView {...this.getProps()} />;
   }
